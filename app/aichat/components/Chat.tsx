@@ -101,15 +101,17 @@ const ChatComponent: React.FC<ChatProps> = ({
   // Get messages from chat
   const { messages } = useChat({
     id: 'chat',
-    key: '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',
     api: apiEndpoint,
     body: {
       chatId: chatId,
       option: optimisticOption,
+      selectedBlobs: selectedBlobs
     },
     experimental_throttle: 50,
     initialMessages: currentChat?.chat_messages,
-    onFinish: async () => {      
+    onFinish: async () => {
+      console.log("ERERERERERERE");
+      
       if (chatId === currentChatId) return;
       const existingParams = searchParams.toString();
       const newUrl = `${pathname}/${chatId}${
@@ -121,8 +123,7 @@ const ChatComponent: React.FC<ChatProps> = ({
 
     onError: (err) => {
       console.error('❌ Chat error:', err);
-    },
-    
+    }
   });
 
   const { mutate } = useSWRConfig();
@@ -360,7 +361,6 @@ const MessageInput = ({
   const { selectedBlobs } = useUpload();
   const { input, handleInputChange, handleSubmit, status, stop, reload } =
     useChat({
-      key: "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",
       id: 'chat', // Use the same ID to share state
       api: apiEndpoint,
       body: {

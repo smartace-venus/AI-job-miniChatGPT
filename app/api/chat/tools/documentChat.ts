@@ -2,8 +2,9 @@
 import { tool } from 'ai';
 import { z } from 'zod';
 import { embed, generateObject } from 'ai';
-import { openai } from '@ai-sdk/openai';
+import { voyage } from 'voyage-ai-provider';
 import { createServerSupabaseClient } from '@/lib/server/server';
+import { openai } from '@ai-sdk/openai';
 
 // Function to sanitize filenames
 function sanitizeFilename(filename: string): string {
@@ -40,7 +41,7 @@ const zodSchemaSearch = z.object({
 });
 
 // Embedding model for query
-const embeddingModel = openai.embedding('text-embedding-3-small', {
+const embeddingModel = voyage.textEmbeddingModel('voyage-3-large', {
   inputType: 'query',
   truncation: false,
   outputDimension: 1024,

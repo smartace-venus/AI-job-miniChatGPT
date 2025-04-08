@@ -1,96 +1,137 @@
-
-import { streamText, convertToCoreMessages } from 'ai';
-import { openai } from '@ai-sdk/openai';
-import { searchUserDocument } from './tools/documentChat';
-import { getSession } from '@/lib/server/supabase';
-import { Ratelimit } from '@upstash/ratelimit';
-import { redis } from '@/lib/server/server';
-import { saveChatToSupbabase } from './SaveToDb';
 import { type NextRequest, NextResponse } from 'next/server';
+import type { Message } from 'ai';
+import { streamText, convertToCoreMessages } from 'ai';
+import { saveChatToSupbabase } from './SaveToDb';
+import { Ratelimit } from '@upstash/ratelimit';
+import { openai } from '@ai-sdk/openai';
+import type { AnthropicProviderOptions } from '@ai-sdk/anthropic';
+import { anthropic } from '@ai-sdk/anthropic';
+import { redis } from '@/lib/server/server';
+import { getSession } from '@/lib/server/supabase';
+import { searchUserDocument } from './tools/documentChat';
 
 export const dynamic = 'force-dynamic';
+
 export const maxDuration = 60;
 
 const getSystemPrompt = (selectedFiles: string[]) => {
-  const base = `You are a helpful assistant. Use markdown for formatting.`;
-  if (selectedFiles.length === 0) return base;
+  const basePrompt = `You are a helpful assistant. Answer all questions to the best of your ability. Use markdown for formatting your responses to improve readability.`;
 
-  return `${base}
+  if (selectedFiles.length > 0) {
+    return `${basePrompt}
 
-IMPORTANT: The user uploaded ${selectedFiles.length} document(s): ${selectedFiles.join(', ')}
+IMPORTANT: The user has uploaded ${selectedFiles.length
+      } document(s): ${selectedFiles.join(', ')}. 
 
-1. Use the \`searchUserDocument\` tool for questions related to these documents.
-2. Add references using: [Title, p.X](<?pdf=Title&p=X>)
-3. Prefer document content over general knowledge.
-`;
+When answering questions that might be addressed in these documents:
+1. ALWAYS use the searchUserDocument tool to retrieve relevant information from the uploaded documents
+2. Reference the documents properly in your response with the exact format: [Document title, p.X](<?pdf=Document_title&p=X>)
+3. Include direct quotes from the documents when appropriate
+4. When information from the documents contradicts your general knowledge, prioritize the document content
+
+For questions not related to the uploaded documents, you can respond based on your general knowledge.`;
+  }
+
+  return basePrompt;
 };
 
-const getModel = (modelName: string) => openai(modelName);
+const getModel = (selectedModel: string) => {
+  if (selectedModel === 'sonnet-3-7') {
+    return anthropic('claude-3-7-sonnet-20250219');
+  } else {
+    return openai(selectedModel);
+  }
+};
 
 export async function POST(req: NextRequest) {
   const session = await getSession();
-  if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
-  const body = await req.json();
-  const {
-    chatId,
-    option = 'gpt-3.5-turbo-1106',
-    selectedBlobs = [],
-    messages = []  } = body;
-
-    const signal = req.signal;
-
-  if (!chatId) return NextResponse.json({ error: 'Missing chatId' }, { status: 400 });
-
+  if (!session) {
+    return new NextResponse('Unauthorized', {
+      status: 401,
+      headers: {
+        'Content-Type': 'application/json'
+      }
+    });
+  }
   const ratelimit = new Ratelimit({
     redis,
-    limiter: Ratelimit.slidingWindow(30, '24h')
+    limiter: Ratelimit.slidingWindow(30, '24h') // 30 msg per 24 hours
   });
 
-  const { success, limit, remaining, reset } = await ratelimit.limit(`ratelimit_${session.id}`);
+  const { success, limit, reset, remaining } = await ratelimit.limit(
+    `ratelimit_${session.id}`
+  );
   if (!success) {
-    return NextResponse.json(
-      { error: 'Rate limit exceeded' },
-      {
-        status: 429,
-        headers: {
-          'X-RateLimit-Limit': limit.toString(),
-          'X-RateLimit-Remaining': remaining.toString(),
-          'X-RateLimit-Reset': new Date(reset * 1000).toISOString()
-        }
+    return new NextResponse('Rate limit exceeded. Please try again later.', {
+      status: 429,
+      headers: {
+        'Content-Type': 'application/json',
+        'X-RateLimit-Limit': limit.toString(),
+        'X-RateLimit-Remaining': remaining.toString(),
+        'X-RateLimit-Reset': new Date(reset * 1000).toISOString()
       }
-    );
+    });
   }
 
-  try {
-    const model = getModel(option);
-    const SYSTEM_PROMPT = getSystemPrompt(selectedBlobs);
+  const body = await req.json();
+  const messages: Message[] = body.messages ?? [];
+  const chatSessionId = body.chatId;
+  const signal = body.signal;
+  const selectedFiles: string[] = body.selectedBlobs ?? [];
 
-    const result = await streamText({
+  if (!chatSessionId) {
+    return new NextResponse('Chat session ID is empty.', {
+      status: 400,
+      headers: {
+        'Content-Type': 'application/json'
+      }
+    });
+  }
+  const selectedModel = body.option ?? 'gpt-3.5-turbo-1106';
+  const userId = session.id;
+  try {
+    const model = getModel(selectedModel);
+    const SYSTEM_PROMPT = getSystemPrompt(selectedFiles);
+    const result = streamText({
       model,
       system: SYSTEM_PROMPT,
       messages: convertToCoreMessages(messages),
-      tools: {
-        searchUserDocument: searchUserDocument({
-          userId: session.id,
-          selectedFiles: selectedBlobs
-        })
+      abortSignal: signal,
+      providerOptions: {
+        anthropic: {
+          thinking: { type: 'enabled', budgetTokens: 12000 }
+        } satisfies AnthropicProviderOptions
       },
+      tools: {
+        searchUserDocument: searchUserDocument({ userId, selectedFiles })
+      },
+      maxSteps: 3,
       experimental_telemetry: {
         isEnabled: true,
         functionId: 'api_chat',
         metadata: {
           userId: session.id,
-          chatId
-        }
+          chatId: chatSessionId
+        },
+        recordInputs: true,
+        recordOutputs: true
       },
       onFinish: async (event) => {
         try {
-          const last = messages[messages.length - 1];
-          const userMsg = typeof last.content === 'string' ? last.content : '';
-          await saveChatToSupbabase(chatId, session.id, userMsg, event.text, event.reasoning);
-        } catch (err) {
-          console.error('❌ Failed to save chat:', err);
+          const lastMessage = messages[messages.length - 1];
+          const lastMessageContent =
+          typeof lastMessage.content === 'string' ? lastMessage.content : '';
+          await saveChatToSupbabase(
+            chatSessionId,
+            session.id,
+            lastMessageContent,
+            event.text,
+            event.reasoning
+          );
+          console.log('Chat saved to Supabase:', chatSessionId);
+        } catch (error) {
+          console.error('Error saving chat to Redis:', error);
         }
       }
     });
@@ -98,9 +139,21 @@ export async function POST(req: NextRequest) {
     return result.toDataStreamResponse({
       sendReasoning: true
     });
-
-  } catch (err) {
-    console.error('❌ Chat API error:', err);
-    return NextResponse.json({ error: 'Unexpected server error' }, { status: 500 });
+  } catch (e) {
+    if (e instanceof Error && e.message === 'InvalidToken') {
+      return new NextResponse('Autentifikationstokenet fejlede.', {
+        status: 401,
+        headers: {
+          'Content-Type': 'application/json'
+        }
+      });
+    }
+    console.error('Error occurred:', e);
+    return new NextResponse('En uventet fejl opstod.', {
+      status: 500,
+      headers: {
+        'Content-Type': 'application/json'
+      }
+    });
   }
 }
