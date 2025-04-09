@@ -10,6 +10,7 @@ import React, {
 import { createClient } from '@/lib/client/client';
 import { encodeBase64 } from '../lib/base64';
 import useSWR, { useSWRConfig } from 'swr';
+import { toast } from 'sonner';
 
 interface UploadContextType {
   isUploading: boolean;
@@ -40,6 +41,7 @@ export const UploadProvider: React.FC<{
   children: React.ReactNode;
   userId: string;
 }> = ({ children, userId }) => {
+  const [uploadFileCount, setUploadFileCount] = useState<number>(1);
   const [isUploading, setIsUploading] = useState(false);
   const [uploadProgress, setUploadProgress] = useState(0);
   const [uploadStatus, setUploadStatus] = useState('');
@@ -96,6 +98,7 @@ export const UploadProvider: React.FC<{
     async (files: File[]) => {
       setIsUploading(true);
       setUploadProgress(0);
+      await setUploadFileCount(files.length);
       setUploadStatus(`Uploading ${files.length} file${files.length !== 1 ? 's' : ''}...`);
       setStatusSeverity('info');
 
@@ -159,7 +162,7 @@ export const UploadProvider: React.FC<{
           file.name.replace(/ /g, '_').trim()
         );
 
-        setUploadProgress(25);
+        setUploadProgress((prev) => prev + (25 / uploadFileCount));
         setUploadStatus('Preparing files for analysis...');
 
         const response = await fetch('/api/uploaddoc', {
@@ -182,7 +185,7 @@ export const UploadProvider: React.FC<{
         }
 
         const result = await response.json();
-        setUploadProgress(50);
+        setUploadProgress((prev) => prev + (25 / uploadFileCount));
         setUploadStatus('Analyzing files...');
 
         if (result.results[0]?.jobId) {
@@ -245,7 +248,7 @@ export const UploadProvider: React.FC<{
   useEffect(() => {
     if (processingStatus) {
       if (processingStatus.status === 'SUCCESS') {
-        setUploadProgress(75);
+        setUploadProgress((prev) => prev + (25 / uploadFileCount));
         setUploadStatus('Finalizing files...');
         setShouldProcessDoc(true);
       } else if (processingStatus.status === 'PENDING') {
@@ -263,7 +266,7 @@ export const UploadProvider: React.FC<{
     if (processDocResult) {
       if (processDocResult.status === 'SUCCESS') {
         setIsUploading(false);
-        setUploadProgress(100);
+        setUploadProgress((prev) => prev + (25 / uploadFileCount));
         setUploadStatus('Files are uploaded and processed.');
         setStatusSeverity('success');
         mutate(`userFiles`);
@@ -272,20 +275,22 @@ export const UploadProvider: React.FC<{
           resetUploadState();
         }, 3000);
       } else {
-        setIsUploading(false);
-        setUploadStatus('Error finalizing files.');
-        setStatusSeverity('error');
-        setCurrentJobId(null);
-        setCurrentFileNames([]);
-        setShouldProcessDoc(false);
+        // setIsUploading(false);
+        // setUploadStatus('Error finalizing files.');
+        // setStatusSeverity('error');
+        // setCurrentJobId(null);
+        // setCurrentFileNames([]);
+        // setShouldProcessDoc(false);
+        toast.error('Successfully Uploaded, but Processing Document Engine is Not Completed Yet...');
       }
     } else if (processDocError) {
-      setIsUploading(false);
-      setUploadStatus('Error finalizing files.');
-      setStatusSeverity('error');
-      setCurrentJobId(null);
-      setCurrentFileNames([]);
-      setShouldProcessDoc(false);
+      // setIsUploading(false);
+      // setUploadStatus('Error finalizing files.');
+      // setStatusSeverity('error');
+      // setCurrentJobId(null);
+      // setCurrentFileNames([]);
+      // setShouldProcessDoc(false);
+      toast.error('Successfully Uploaded, but Processing Document Engine is Not Completed Yet...');
     }
   }, [
     processingStatus,
