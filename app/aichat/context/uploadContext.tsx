@@ -165,7 +165,7 @@ export const UploadProvider: React.FC<{
           file.name.replace(/ /g, '_').trim()
         );
 
-        setUploadProgress((prev) => prev + (25 / uploadFileCount));
+        setUploadProgress((prev) => prev + (50 / uploadFileCount));
         setUploadStatus('Preparing files for analysis...');
 
         const response = await fetch('/api/uploaddoc', {
@@ -188,15 +188,16 @@ export const UploadProvider: React.FC<{
         }
 
         const result = await response.json();
-        setUploadProgress((prev) => prev + (25 / uploadFileCount));
-        setUploadStatus('Analyzing files...');
+        setUploadProgress((prev) => prev + (50 / uploadFileCount));
+        // setUploadStatus('Analyzing files...');
 
-        if (result.results[0]?.jobId) {
-          setCurrentJobId(result.results[0].jobId);
-          setCurrentFileNames(files.map(file => file.name));
-        } else {
-          throw new Error('No job ID received from server.');
-        }
+        // if (result.results[0]?.jobId) {
+        //   setCurrentJobId(result.results[0].jobId);
+        //   setCurrentFileNames(files.map(file => file.name));
+        // } else {
+        //   throw new Error('No job ID received from server.');
+        // }
+        refreshProcess();
       } catch (error) {
         console.error('Error uploading files:', error);
 
@@ -248,60 +249,70 @@ export const UploadProvider: React.FC<{
     setSelectedFiles(null);
   };
 
-  useEffect(() => {
-    if (processingStatus) {
-      if (processingStatus.status === 'SUCCESS') {
-        setUploadProgress((prev) => prev + (25 / uploadFileCount));
-        setUploadStatus('Finalizing files...');
-        setShouldProcessDoc(true);
-      } else if (processingStatus.status === 'PENDING') {
-        setUploadStatus('Still analyzing files...');
-      }
-    } else if (processingError) {
-      setIsUploading(false);
-      setUploadStatus('Error analyzing files.');
-      setStatusSeverity('error');
-      setCurrentJobId(null);
-      setCurrentFileNames([]);
-      setShouldProcessDoc(false);
-    }
+  const refreshProcess = () => {
+    setIsUploading(false);
+    setUploadStatus('Files are uploaded and processed.');
+    setStatusSeverity('success');
+    mutate(`userFiles`);
 
-    if (processDocResult) {
-      if (processDocResult.status === 'SUCCESS') {
-        setIsUploading(false);
-        setUploadProgress((prev) => prev + (25 / uploadFileCount));
-        setUploadStatus('Files are uploaded and processed.');
-        setStatusSeverity('success');
-        mutate(`userFiles`);
+    setTimeout(() => {
+      resetUploadState();
+    }, 3000);
+  }
+  // useEffect(() => {
+  //   if (processingStatus) {
+  //     if (processingStatus.status === 'SUCCESS') {
+  //       setUploadProgress((prev) => prev + (25 / uploadFileCount));
+  //       setUploadStatus('Finalizing files...');
+  //       setShouldProcessDoc(true);
+  //     } else if (processingStatus.status === 'PENDING') {
+  //       setUploadStatus('Still analyzing files...');
+  //     }
+  //   } else if (processingError) {
+  //     setIsUploading(false);
+  //     setUploadStatus('Error analyzing files.');
+  //     setStatusSeverity('error');
+  //     setCurrentJobId(null);
+  //     setCurrentFileNames([]);
+  //     setShouldProcessDoc(false);
+  //   }
 
-        setTimeout(() => {
-          resetUploadState();
-        }, 3000);
-      } else {
-        // setIsUploading(false);
-        // setUploadStatus('Error finalizing files.');
-        // setStatusSeverity('error');
-        // setCurrentJobId(null);
-        // setCurrentFileNames([]);
-        // setShouldProcessDoc(false);
-        toast.error('Successfully Uploaded, but Processing Document Engine is Not Completed Yet...');
-      }
-    } else if (processDocError) {
-      // setIsUploading(false);
-      // setUploadStatus('Error finalizing files.');
-      // setStatusSeverity('error');
-      // setCurrentJobId(null);
-      // setCurrentFileNames([]);
-      // setShouldProcessDoc(false);
-      toast.error('Successfully Uploaded, but Processing Document Engine is Not Completed Yet...');
-    }
-  }, [
-    processingStatus,
-    processingError,
-    processDocResult,
-    processDocError,
-    mutate
-  ]);
+  //   if (processDocResult) {
+  //     if (processDocResult.status === 'SUCCESS') {
+  //       setIsUploading(false);
+  //       setUploadProgress((prev) => prev + (25 / uploadFileCount));
+  //       setUploadStatus('Files are uploaded and processed.');
+  //       setStatusSeverity('success');
+  //       mutate(`userFiles`);
+
+  //       setTimeout(() => {
+  //         resetUploadState();
+  //       }, 3000);
+  //     } else {
+  //       // setIsUploading(false);
+  //       // setUploadStatus('Error finalizing files.');
+  //       // setStatusSeverity('error');
+  //       // setCurrentJobId(null);
+  //       // setCurrentFileNames([]);
+  //       // setShouldProcessDoc(false);
+  //       toast.error('Successfully Uploaded, but Processing Document Engine is Not Completed Yet...');
+  //     }
+  //   } else if (processDocError) {
+  //     // setIsUploading(false);
+  //     // setUploadStatus('Error finalizing files.');
+  //     // setStatusSeverity('error');
+  //     // setCurrentJobId(null);
+  //     // setCurrentFileNames([]);
+  //     // setShouldProcessDoc(false);
+  //     toast.error('Successfully Uploaded, but Processing Document Engine is Not Completed Yet...');
+  //   }
+  // }, [
+  //   processingStatus,
+  //   processingError,
+  //   processDocResult,
+  //   processDocError,
+  //   mutate
+  // ]);
 
   const contextValue = useMemo(
     () => ({
