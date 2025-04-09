@@ -117,11 +117,14 @@ export const UploadProvider: React.FC<{
           0
         );
       }
-
+      
+      
       const uploadToSupabase = async (file: File, userId: string) => {
         const fileNameWithUnderscores = file.name.replace(/ /g, '_').trim();
         const encodedFileName = encodeBase64(fileNameWithUnderscores);
         const filePath = `${userId}/${encodedFileName}`;
+        
+        console.log("OKAY!", filePath);
 
         const { data, error } = await supabase.storage
           .from('userfiles')
