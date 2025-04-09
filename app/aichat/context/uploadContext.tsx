@@ -100,24 +100,27 @@ export const UploadProvider: React.FC<{
       setStatusSeverity('info');
       async function getTotalUploadedSize(): Promise<number> {
         const { data, error } = await supabase.storage
-          .from('userfiles')
-          .list(userId);
-
+        .from('userfiles')
+        .list(userId + '/');
+        
         if (error) {
           console.error('Error fetching user files:', error);
           return 0;
         }
-
+        
         return data.reduce(
           (total, file) => total + (file.metadata.size || 0),
           0
         );
       }
-
+      
+      
       const uploadToSupabase = async (file: File, userId: string) => {
         const fileNameWithUnderscores = file.name.replace(/ /g, '_').trim();
         const encodedFileName = encodeBase64(fileNameWithUnderscores);
         const filePath = `${userId}/${encodedFileName}`;
+        
+        console.log("OKAY!", filePath);
 
         const { data, error } = await supabase.storage
           .from('userfiles')
