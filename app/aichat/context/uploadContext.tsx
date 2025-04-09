@@ -13,12 +13,12 @@ import useSWR, { useSWRConfig } from 'swr';
 
 interface UploadContextType {
   isUploading: boolean;
-  uploadFile: (file: File) => Promise<void>;
+  uploadFile: (files: File[]) => Promise<void>;
   uploadProgress: number;
   uploadStatus: string;
   statusSeverity: string;
-  selectedFile: File | null;
-  setSelectedFile: React.Dispatch<React.SetStateAction<File | null>>;
+  selectedFiles: File[] | null;
+  setSelectedFiles: React.Dispatch<React.SetStateAction<File[] | null>>;
   selectedBlobs: string[];
   setSelectedBlobs: (blobs: string[]) => void;
 }
@@ -45,9 +45,9 @@ export const UploadProvider: React.FC<{
   const [uploadStatus, setUploadStatus] = useState('');
   const [statusSeverity, setStatusSeverity] = useState<string>('info');
   const [currentJobId, setCurrentJobId] = useState<string | null>(null);
-  const [currentFileName, setCurrentFileName] = useState<string | null>(null);
+  const [currentFileNames, setCurrentFileNames] = useState<string[]>([]);
   const [shouldProcessDoc, setShouldProcessDoc] = useState(false);
-  const [selectedFile, setSelectedFile] = useState<File | null>(null);
+  const [selectedFiles, setSelectedFiles] = useState<File[] | null>(null);
   const [selectedBlobs, setSelectedBlobs] = useState<string[]>([]);
 
   const { mutate } = useSWRConfig();
@@ -74,16 +74,16 @@ export const UploadProvider: React.FC<{
   );
 
   const { data: processDocResult, error: processDocError } = useSWR(
-    shouldProcessDoc && currentJobId && currentFileName
-      ? ['/api/processdoc', currentJobId, currentFileName]
+    shouldProcessDoc && currentJobId && currentFileNames.length > 0
+      ? ['/api/processdoc', currentJobId, currentFileNames]
       : null,
-    async ([url, jobId, fileName]) => {
+    async ([url, jobId, fileNames]) => {
       const response = await fetch(url, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json'
         },
-        body: JSON.stringify({ jobId, fileName })
+        body: JSON.stringify({ jobId, fileNames })
       });
       if (!response.ok) {
         throw new Error('Failed to process document');
@@ -93,15 +93,16 @@ export const UploadProvider: React.FC<{
   );
 
   const uploadFile = useCallback(
-    async (file: File) => {
+    async (files: File[]) => {
       setIsUploading(true);
       setUploadProgress(0);
-      setUploadStatus('Uploading file...');
+      setUploadStatus(`Uploading ${files.length} file${files.length !== 1 ? 's' : ''}...`);
       setStatusSeverity('info');
+
       async function getTotalUploadedSize(): Promise<number> {
         const { data, error } = await supabase.storage
-        .from('userfiles')
-        .list(userId + '/');
+          .from('userfiles')
+          .list(userId + '/');
         
         if (error) {
           console.error('Error fetching user files:', error);
@@ -113,14 +114,11 @@ export const UploadProvider: React.FC<{
           0
         );
       }
-      
-      
+
       const uploadToSupabase = async (file: File, userId: string) => {
         const fileNameWithUnderscores = file.name.replace(/ /g, '_').trim();
         const encodedFileName = encodeBase64(fileNameWithUnderscores);
         const filePath = `${userId}/${encodedFileName}`;
-        
-        console.log("OKAY!", filePath);
 
         const { data, error } = await supabase.storage
           .from('userfiles')
@@ -138,11 +136,12 @@ export const UploadProvider: React.FC<{
 
         return data.path;
       };
-      let uploadedFilePath: string | null = null;
+
+      const uploadedFilePaths: string[] = [];
 
       try {
         const currentTotalSize = await getTotalUploadedSize();
-        const newTotalSize = currentTotalSize + file.size;
+        const newTotalSize = currentTotalSize + files.reduce((sum, file) => sum + file.size, 0);
 
         if (newTotalSize > MAX_TOTAL_SIZE) {
           throw new Error(
@@ -150,11 +149,18 @@ export const UploadProvider: React.FC<{
           );
         }
 
-        uploadedFilePath = await uploadToSupabase(file, userId);
-        const fileNameWithUnderscores = file.name.replace(/ /g, '_').trim();
+        // Upload all files first
+        for (const file of files) {
+          const path = await uploadToSupabase(file, userId);
+          uploadedFilePaths.push(path);
+        }
+
+        const fileNamesWithUnderscores = files.map(file => 
+          file.name.replace(/ /g, '_').trim()
+        );
 
         setUploadProgress(25);
-        setUploadStatus('Preparing file for analysis...');
+        setUploadStatus('Preparing files for analysis...');
 
         const response = await fetch('/api/uploaddoc', {
           method: 'POST',
@@ -162,46 +168,48 @@ export const UploadProvider: React.FC<{
             'Content-Type': 'application/json'
           },
           body: JSON.stringify({
-            uploadedFiles: [
-              { name: fileNameWithUnderscores, path: uploadedFilePath }
-            ]
+            uploadedFiles: fileNamesWithUnderscores.map((name, i) => ({
+              name,
+              path: uploadedFilePaths[i]
+            }))
           })
         });
 
         if (!response.ok) {
           throw new Error(
-            `Error processing file on server: ${response.statusText}`
+            `Error processing files on server: ${response.statusText}`
           );
         }
 
         const result = await response.json();
         setUploadProgress(50);
-        setUploadStatus('Analyzing file...');
+        setUploadStatus('Analyzing files...');
 
-        if (result.results[0].jobId) {
+        if (result.results[0]?.jobId) {
           setCurrentJobId(result.results[0].jobId);
-          setCurrentFileName(file.name);
+          setCurrentFileNames(files.map(file => file.name));
         } else {
           throw new Error('No job ID received from server.');
         }
       } catch (error) {
-        console.error('Error uploading file:', error);
+        console.error('Error uploading files:', error);
 
-        if (uploadedFilePath) {
+        // Clean up any uploaded files if there was an error
+        if (uploadedFilePaths.length > 0) {
           try {
             const { error: deleteError } = await supabase.storage
               .from('userfiles')
-              .remove([uploadedFilePath]);
+              .remove(uploadedFilePaths);
 
             if (deleteError) {
               console.error(
-                `Error deleting file ${uploadedFilePath}:`,
+                'Error deleting files:',
                 deleteError
               );
             }
           } catch (deleteError) {
             console.error(
-              `Error deleting file ${uploadedFilePath}:`,
+              'Error deleting files:',
               deleteError
             );
           }
@@ -211,13 +219,13 @@ export const UploadProvider: React.FC<{
           setUploadStatus(error.message);
         } else {
           setUploadStatus(
-            'Error uploading or processing file. Please try again.'
+            'Error uploading or processing files. Please try again.'
           );
         }
         setStatusSeverity('error');
         setIsUploading(false);
         setCurrentJobId(null);
-        setCurrentFileName(null);
+        setCurrentFileNames([]);
       }
     },
     [userId]
@@ -229,9 +237,9 @@ export const UploadProvider: React.FC<{
     setUploadStatus('');
     setStatusSeverity('info');
     setCurrentJobId(null);
-    setCurrentFileName(null);
+    setCurrentFileNames([]);
     setShouldProcessDoc(false);
-    setSelectedFile(null);
+    setSelectedFiles(null);
   };
 
   useEffect(() => {
@@ -248,7 +256,7 @@ export const UploadProvider: React.FC<{
       setUploadStatus('Error analyzing files.');
       setStatusSeverity('error');
       setCurrentJobId(null);
-      setCurrentFileName(null);
+      setCurrentFileNames([]);
       setShouldProcessDoc(false);
     }
 
@@ -260,7 +268,6 @@ export const UploadProvider: React.FC<{
         setStatusSeverity('success');
         mutate(`userFiles`);
 
-        // Set a timeout to reset the state after 2 seconds
         setTimeout(() => {
           resetUploadState();
         }, 3000);
@@ -269,7 +276,7 @@ export const UploadProvider: React.FC<{
         setUploadStatus('Error finalizing files.');
         setStatusSeverity('error');
         setCurrentJobId(null);
-        setCurrentFileName(null);
+        setCurrentFileNames([]);
         setShouldProcessDoc(false);
       }
     } else if (processDocError) {
@@ -277,7 +284,7 @@ export const UploadProvider: React.FC<{
       setUploadStatus('Error finalizing files.');
       setStatusSeverity('error');
       setCurrentJobId(null);
-      setCurrentFileName(null);
+      setCurrentFileNames([]);
       setShouldProcessDoc(false);
     }
   }, [
@@ -295,8 +302,8 @@ export const UploadProvider: React.FC<{
       uploadProgress,
       uploadStatus,
       statusSeverity,
-      selectedFile,
-      setSelectedFile,
+      selectedFiles,
+      setSelectedFiles,
       selectedBlobs,
       setSelectedBlobs
     }),
@@ -306,8 +313,7 @@ export const UploadProvider: React.FC<{
       uploadProgress,
       uploadStatus,
       statusSeverity,
-      selectedFile,
-      setSelectedFile,
+      selectedFiles,
       selectedBlobs
     ]
   );
