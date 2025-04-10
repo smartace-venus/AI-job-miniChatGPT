@@ -189,9 +189,42 @@ export const UploadProvider: React.FC<{
         }
 
         const result = await response.json();
-        setUploadProgress((prev) => prev + (25 / uploadFileCount));
+        // setUploadProgress((prev) => prev + (25 / uploadFileCount));
 
-        setUploadStatus('Analyzing files...');
+        // setUploadStatus('Analyzing files...');
+        setUploadStatus('Generating embeddings...');
+
+        // Process each result sequentially
+        for (const fileResult of result.results) {
+          if (fileResult.status === 'success') {
+            try {
+              const response = await fetch('/api/processdoc', {
+                method: 'POST',
+                headers: {
+                  'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({
+                  jobId: fileResult.jobId,
+                  fileName: fileResult.file
+                })
+              });
+
+              if (!response.ok) {
+                throw new Error(`Error processing ${fileResult.file}`);
+              }
+
+              setUploadProgress((prev) => prev + (25 / uploadFileCount));
+              setUploadStatus('Saving to database...');
+            } catch (error) {
+              console.error(`Error processing ${fileResult.file}:`, error);
+              setStatusSeverity('error');
+              setUploadStatus(`Failed to process ${fileResult.file}`);
+              throw error;
+            }
+          }
+        }
+        setUploadProgress(100);
+        setUploadStatus('Processing complete!');
 
         if (result.results[0]?.jobId) {
           setCurrentJobId(result.results[0].jobId);

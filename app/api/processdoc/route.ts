@@ -22,11 +22,17 @@ const embeddingModel = voyage.textEmbeddingModel('voyage-3-large', {
 });
 
 function sanitizeFilename(filename: string): string {
-  const sanitized = filename
-    .normalize('NFD')
-    .replace(/[\u0300-\u036f]/g, '')
-    .replace(/[^a-zA-Z0-9._-]/g, '_');
-  return sanitized;
+  if (!filename) return 'untitled';
+  try {
+    const sanitized = filename
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .replace(/[^a-zA-Z0-9._-]/g, '_');
+    return sanitized;
+  } catch (error) {
+    console.error('Error sanitizing filename:', error);
+    return 'untitled';
+  }
 }
 
 interface DocumentRecord {
@@ -47,19 +53,7 @@ interface DocumentRecord {
   total_chunks: number;
 }
 
-async function processFile(pages: string[], fileName: string, userId: string): Promise<{ 
-  filterTags: string;
-  documentChunks: Array<{
-    content: string;
-    embedding: string;
-    pageNumber: number;
-    ai_title: string;
-    ai_description: string;
-    ai_maintopics: string[];
-    ai_keyentities: string[];
-    primaryLanguage?: string;
-  }>;
-}> {
+async function processFile(pages: string[], fileName: string, userId: string) {
   let selectedDocuments = pages;
   if (pages.length > 19) {
     selectedDocuments = [...pages.slice(0, 10), ...pages.slice(-10)];
@@ -132,10 +126,10 @@ async function processFile(pages: string[], fileName: string, userId: string): P
       Description: ${object.shortDescription}
       Main Topics: ${object.mainTopics}
       Key Entities: ${object.keyEntities}
-      
+
       Content:
       ${doc}
-      
+
       Preliminary Analysis:
       ${combinedPreliminaryAnswers}
       `
@@ -144,7 +138,7 @@ async function processFile(pages: string[], fileName: string, userId: string): P
       Date: ${timestamp}
       Page: ${pageNumber} of ${totalPages}
       Title: ${object.descriptiveTitle}
-      
+
       Content:
       ${doc}
       `;
@@ -160,6 +154,11 @@ async function processFile(pages: string[], fileName: string, userId: string): P
             if (!embedding) {
               console.log('No embedding generated, skipping document');
               return;
+            }
+
+            if (!userId) {
+              console.error('No user ID provided');
+              throw new Error('Authentication required');
             }
 
             batchRecords.push({
@@ -206,10 +205,15 @@ async function processFile(pages: string[], fileName: string, userId: string): P
               onConflict:
                 'user_id, title, timestamp, page_number, chunk_number',
               ignoreDuplicates: false
-            });
+            })
+            .select();
 
-          if (error) {
-            console.error('Error upserting batch to Supabase:', error);
+          if (error?.code === '42501') { // RLS Policy violation
+            console.error('RLS Policy violation - check table permissions');
+            throw new Error('Permission denied: Unable to insert documents');
+          } else if (error) {
+            console.error('Database error:', error);
+            throw new Error(`Database error: ${error.message}`);
           } else {
             console.log(
               `Successfully upserted batch of ${batch.length} records`
@@ -228,19 +232,7 @@ async function processFile(pages: string[], fileName: string, userId: string): P
   }
 
   console.log('Final Token Usage:', totalPromptTokens, totalCompletionTokens);
-  return {
-    filterTags,
-    documentChunks: batchRecords.map(record => ({
-      content: record.text_content,
-      embedding: record.embedding,
-      pageNumber: record.page_number,
-      ai_title: record.ai_title || '',
-      ai_description: record.ai_description || '',
-      ai_maintopics: record.ai_maintopics || [],
-      ai_keyentities: record.ai_keyentities || [],
-      primaryLanguage: record.primary_language
-    }))
-  };
+  return filterTags;
 }
 
 async function processDocumentWithAgentChains(
@@ -355,46 +347,7 @@ export async function POST(req: NextRequest) {
 
     const filterTags = await processFile(pages, fileName, userId);
 
-    // Index the processed documents
-    const indexResponse = await fetch(
-      'https://api.cloud.llamaindex.ai/api/v1/indices',
-      {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${process.env.LLAMA_CLOUD_API_KEY}`,
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({
-          name: `${fileName}-${userId}`,
-          description: `Index for ${fileName}`,
-          data: pages.map((page, index) => ({
-            text: page,
-            metadata: {
-              page_number: index + 1,
-              file_name: fileName,
-              user_id: userId,
-              filter_tags: filterTags
-            }
-          }))
-        })
-      }
-    );
-
-    if (!indexResponse.ok) {
-      console.error('Failed to index documents:', await indexResponse.text());
-      return NextResponse.json(
-        { error: 'Failed to index documents' },
-        { status: 500 }
-      );
-    }
-
-    const indexData = await indexResponse.json();
-
-    return NextResponse.json({ 
-      status: 'SUCCESS', 
-      filterTags,
-      indexId: indexData.id 
-    });
+    return NextResponse.json({ status: 'SUCCESS', filterTags });
   } catch (error) {
     console.error('Error in POST request:', error);
     return NextResponse.json(

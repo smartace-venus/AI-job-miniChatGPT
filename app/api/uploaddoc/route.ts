@@ -55,6 +55,8 @@ export async function POST(req: NextRequest) {
         const formData = new FormData();
         formData.append('file', new Blob([data]), file.name);
 
+        console.log("file.name => ", file.name)
+
         const uploadResponse = await fetch(
           'https://api.cloud.llamaindex.ai/api/v1/parsing/upload',
           {
