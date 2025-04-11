@@ -15,7 +15,12 @@ export const dynamic = 'force-dynamic';
 export const maxDuration = 60;
 
 const getSystemPrompt = (selectedFiles: string[]) => {
-  const basePrompt = `You are a helpful assistant. Answer all questions to the best of your ability. Use markdown for formatting your responses to improve readability.`;
+  const basePrompt = `You are a legal assistant for the BNR Platform. When answering questions:
+1. Prioritize information from official legal documents when available
+2. Cite specific sections and references from the documents
+3. Use clear, professional language appropriate for legal context
+4. Format responses with markdown for improved readability
+5. Clearly indicate when falling back to general knowledge vs document-based answers.`;
 
   if (selectedFiles.length > 0) {
     return `${basePrompt}

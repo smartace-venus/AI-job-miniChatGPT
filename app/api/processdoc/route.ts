@@ -22,11 +22,17 @@ const embeddingModel = voyage.textEmbeddingModel('voyage-3-large', {
 });
 
 function sanitizeFilename(filename: string): string {
-  const sanitized = filename
-    .normalize('NFD')
-    .replace(/[\u0300-\u036f]/g, '')
-    .replace(/[^a-zA-Z0-9._-]/g, '_');
-  return sanitized;
+  if (!filename) return 'untitled';
+  try {
+    const sanitized = filename
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .replace(/[^a-zA-Z0-9._-]/g, '_');
+    return sanitized;
+  } catch (error) {
+    console.error('Error sanitizing filename:', error);
+    return 'untitled';
+  }
 }
 
 interface DocumentRecord {
@@ -120,10 +126,10 @@ async function processFile(pages: string[], fileName: string, userId: string) {
       Description: ${object.shortDescription}
       Main Topics: ${object.mainTopics}
       Key Entities: ${object.keyEntities}
-      
+
       Content:
       ${doc}
-      
+
       Preliminary Analysis:
       ${combinedPreliminaryAnswers}
       `
@@ -132,7 +138,7 @@ async function processFile(pages: string[], fileName: string, userId: string) {
       Date: ${timestamp}
       Page: ${pageNumber} of ${totalPages}
       Title: ${object.descriptiveTitle}
-      
+
       Content:
       ${doc}
       `;
@@ -148,6 +154,11 @@ async function processFile(pages: string[], fileName: string, userId: string) {
             if (!embedding) {
               console.log('No embedding generated, skipping document');
               return;
+            }
+
+            if (!userId) {
+              console.error('No user ID provided');
+              throw new Error('Authentication required');
             }
 
             batchRecords.push({
@@ -194,10 +205,15 @@ async function processFile(pages: string[], fileName: string, userId: string) {
               onConflict:
                 'user_id, title, timestamp, page_number, chunk_number',
               ignoreDuplicates: false
-            });
+            })
+            .select();
 
-          if (error) {
-            console.error('Error upserting batch to Supabase:', error);
+          if (error?.code === '42501') { // RLS Policy violation
+            console.error('RLS Policy violation - check table permissions');
+            throw new Error('Permission denied: Unable to insert documents');
+          } else if (error) {
+            console.error('Database error:', error);
+            throw new Error(`Database error: ${error.message}`);
           } else {
             console.log(
               `Successfully upserted batch of ${batch.length} records`

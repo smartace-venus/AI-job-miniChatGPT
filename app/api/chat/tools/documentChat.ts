@@ -125,6 +125,29 @@ async function getSelectedDocumentsMetadata(
   return data;
 }
 
+async function queryLlamaIndex(query: string, indexId: string) {
+  const response = await fetch(
+    `https://api.cloud.llamaindex.ai/api/v1/indices/${indexId}/query`,
+    {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${process.env.LLAMA_CLOUD_API_KEY}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        query,
+        similarity_top_k: 3
+      })
+    }
+  );
+
+  if (!response.ok) {
+    throw new Error('Failed to query index');
+  }
+
+  return response.json();
+}
+
 export const searchUserDocument = ({ userId, selectedFiles }: DocToolProps) =>
   tool({
     description: `Search through ${

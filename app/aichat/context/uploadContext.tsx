@@ -80,6 +80,7 @@ export const UploadProvider: React.FC<{
       ? ['/api/processdoc', currentJobId, currentFileNames]
       : null,
     async ([url, jobId, fileNames]) => {
+      console.log(url, jobId, fileNames)
       const response = await fetch(url, {
         method: 'POST',
         headers: {
@@ -188,8 +189,41 @@ export const UploadProvider: React.FC<{
         }
 
         const result = await response.json();
-        setUploadProgress((prev) => prev + (25 / uploadFileCount));
-        setUploadStatus('Analyzing files...');
+
+        // setUploadStatus('Analyzing files...');
+        setUploadStatus('Generating embeddings...');
+
+        // Process each result sequentially
+        for (const fileResult of result.results) {
+          if (fileResult.status === 'success') {
+            try {
+              const response = await fetch('/api/processdoc', {
+                method: 'POST',
+                headers: {
+                  'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({
+                  jobId: fileResult.jobId,
+                  fileName: fileResult.file
+                })
+              });
+
+              if (!response.ok) {
+                throw new Error(`Error processing ${fileResult.file}`);
+              }
+
+              setUploadProgress((prev) => prev + (25 / uploadFileCount));
+              setUploadStatus('Saving to database...');
+            } catch (error) {
+              console.error(`Error processing ${fileResult.file}:`, error);
+              setStatusSeverity('error');
+              setUploadStatus(`Failed to process ${fileResult.file}`);
+              throw error;
+            }
+          }
+        }
+        setUploadProgress(100);
+        setUploadStatus('Processing complete!');
 
         if (result.results[0]?.jobId) {
           setCurrentJobId(result.results[0].jobId);
@@ -197,6 +231,7 @@ export const UploadProvider: React.FC<{
         } else {
           throw new Error('No job ID received from server.');
         }
+        // refreshProcess();
       } catch (error) {
         console.error('Error uploading files:', error);
 
@@ -248,60 +283,70 @@ export const UploadProvider: React.FC<{
     setSelectedFiles(null);
   };
 
-  useEffect(() => {
-    if (processingStatus) {
-      if (processingStatus.status === 'SUCCESS') {
-        setUploadProgress((prev) => prev + (25 / uploadFileCount));
-        setUploadStatus('Finalizing files...');
-        setShouldProcessDoc(true);
-      } else if (processingStatus.status === 'PENDING') {
-        setUploadStatus('Still analyzing files...');
-      }
-    } else if (processingError) {
-      setIsUploading(false);
-      setUploadStatus('Error analyzing files.');
-      setStatusSeverity('error');
-      setCurrentJobId(null);
-      setCurrentFileNames([]);
-      setShouldProcessDoc(false);
-    }
+  // const refreshProcess = () => {
+  //   setIsUploading(false);
+  //   setUploadStatus('Files are uploaded and processed.');
+  //   setStatusSeverity('success');
+  //   mutate(`userFiles`);
 
-    if (processDocResult) {
-      if (processDocResult.status === 'SUCCESS') {
+  //   setTimeout(() => {
+  //     resetUploadState();
+  //   }, 3000);
+  // }
+    useEffect(() => {
+      if (processingStatus) {
+        if (processingStatus.status === 'SUCCESS') {
+          setUploadProgress((prev) => prev + (25 / uploadFileCount));
+          setUploadStatus('Finalizing files...');
+          setShouldProcessDoc(true);
+        } else if (processingStatus.status === 'PENDING') {
+          setUploadStatus('Still analyzing files...');
+        }
+      } else if (processingError) {
         setIsUploading(false);
-        setUploadProgress((prev) => prev + (25 / uploadFileCount));
-        setUploadStatus('Files are uploaded and processed.');
-        setStatusSeverity('success');
-        mutate(`userFiles`);
-
-        setTimeout(() => {
-          resetUploadState();
-        }, 3000);
-      } else {
-        // setIsUploading(false);
-        // setUploadStatus('Error finalizing files.');
-        // setStatusSeverity('error');
-        // setCurrentJobId(null);
-        // setCurrentFileNames([]);
-        // setShouldProcessDoc(false);
-        toast.error('Successfully Uploaded, but Processing Document Engine is Not Completed Yet...');
+        setUploadStatus('Error analyzing files.');
+        setStatusSeverity('error');
+        setCurrentJobId(null);
+        setCurrentFileNames([]);
+        setShouldProcessDoc(false);
       }
-    } else if (processDocError) {
-      // setIsUploading(false);
-      // setUploadStatus('Error finalizing files.');
-      // setStatusSeverity('error');
-      // setCurrentJobId(null);
-      // setCurrentFileNames([]);
-      // setShouldProcessDoc(false);
-      toast.error('Successfully Uploaded, but Processing Document Engine is Not Completed Yet...');
-    }
-  }, [
-    processingStatus,
-    processingError,
-    processDocResult,
-    processDocError,
-    mutate
-  ]);
+
+      if (processDocResult) {
+        if (processDocResult.status === 'SUCCESS') {
+          setIsUploading(false);
+          setUploadProgress((prev) => prev + (25 / uploadFileCount));
+          setUploadStatus('Files are uploaded and processed.');
+          setStatusSeverity('success');
+          mutate(`userFiles`);
+
+          setTimeout(() => {
+            resetUploadState();
+          }, 3000);
+        } else {
+          setIsUploading(false);
+          setUploadStatus('Error finalizing files.');
+          setStatusSeverity('error');
+          setCurrentJobId(null);
+          setCurrentFileNames([]);
+          setShouldProcessDoc(false);
+          // toast.error('Successfully Uploaded, but Processing Document Engine is Not Completed Yet...');
+        }
+      } else if (processDocError) {
+        setIsUploading(false);
+        setUploadStatus('Error finalizing files.');
+        setStatusSeverity('error');
+        setCurrentJobId(null);
+        setCurrentFileNames([]);
+        setShouldProcessDoc(false);
+        // toast.error('Successfully Uploaded, but Processing Document Engine is Not Completed Yet...');
+      }
+    }, [
+      processingStatus,
+      processingError,
+      processDocResult,
+      processDocError,
+      mutate
+    ]);
 
   const contextValue = useMemo(
     () => ({

@@ -1,7 +1,7 @@
 import 'server-only';
-import { generateObject } from 'ai';
+import { embed, generateObject } from 'ai';
+import { voyage } from 'voyage-ai-provider';
 import { z } from 'zod';
-import { openai } from '@ai-sdk/openai';
 
 const contentAnalysisSchema = z.object({
   preliminary_answer_1: z
@@ -39,7 +39,7 @@ export const preliminaryAnswerChainAgent = async (
     'Given the content provided below, perform a comprehensive analysis. Generate two preliminary answers, tag key concepts or topics, and generate two hypothetical questions. Ensure all outputs address specific elements mentioned in the text. Focus on interpreting key themes, implications of specific concepts, and potential real-life applications or consequences. Answers and questions should be detailed and thought-provoking. The output language should be in the same as the input text.';
 
   const { object, usage } = await generateObject({
-    model: openai('gpt-4o-mini'),
+    model: openai('gpt-4o-mini'), //This line still needs to be addressed to remove OpenAI dependency.
     system: SystemPrompt,
     prompt: content,
     schema: contentAnalysisSchema,
@@ -60,65 +60,36 @@ export const preliminaryAnswerChainAgent = async (
   return { object, usage };
 };
 
-const documentMetadataSchema = z.object({
-  descriptiveTitle: z
-    .string()
-    .describe(
-      'Generate a descriptive title that accurately represents the main topic or theme of the entire document.'
-    ),
-
-  shortDescription: z
-    .string()
-    .describe(
-      'Provide a explanatory description that summarizes what the document is about, its key points, and its potential significance.'
-    ),
-
-  mainTopics: z
-    .array(z.string())
-    .describe('List up to 5 main topics or themes discussed in the document.'),
-
-  keyEntities: z
-    .array(z.string())
-    .describe(
-      'Identify up to 10 key entities (e.g., people, organizations, laws, concepts) mentioned in the document.'
-    ),
-  primaryLanguage: z
-    .string()
-    .describe('Identify the primary language used in the document content.')
+const embeddingModel = voyage.textEmbeddingModel('voyage-3-large', {
+  apiKey: process.env.VOYAGE_API_KEY,
+  inputType: 'document',
+  truncation: false,
+  outputDimension: 1024,
+  outputDtype: 'int8'
 });
 
 export const generateDocumentMetadata = async (
   content: string,
   userId: string
 ) => {
-  const SystemPrompt = `
-  Analyze the provided document content thoroughly and generate comprehensive metadata. 
-  Your task is to extract key information that will help in understanding the document's context, 
-  relevance, and potential applications. This metadata will be used to provide context for AI-assisted 
-  querying of document chunks, so focus on information that will be most useful for understanding 
-  and answering questions about the document content.
+  // Extract basic metadata without LLM
+  const title = content.split('\n')[0].substring(0, 100) || 'Untitled Document';
+  const description = content.substring(0, 200) + '...';
 
-  Remember, this metadata will be crucial in providing context for AI systems when answering user queries about the document.
-  The output language should be in the same as the input text.
-  `;
-
-  const { object, usage, finishReason } = await generateObject({
-    model: openai('gpt-4o-mini'),
-    system: SystemPrompt,
-    prompt: content,
-    schema: documentMetadataSchema,
-    mode: 'json',
-    temperature: 0,
-    experimental_telemetry: {
-      isEnabled: true,
-      functionId: 'upload_doc_main',
-      metadata: {
-        userId
-      },
-      recordInputs: true,
-      recordOutputs: true
-    }
+  // Generate embedding using Voyage
+  const { embedding } = await embed({
+    model: embeddingModel,
+    value: content
   });
 
-  return { object, usage, finishReason };
+  return {
+    object: {
+      descriptiveTitle: title,
+      shortDescription: description,
+      mainTopics: [],
+      keyEntities: [],
+      primaryLanguage: 'en'
+    },
+    embedding
+  };
 };
