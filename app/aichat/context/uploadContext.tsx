@@ -189,7 +189,6 @@ export const UploadProvider: React.FC<{
         }
 
         const result = await response.json();
-        // setUploadProgress((prev) => prev + (25 / uploadFileCount));
 
         // setUploadStatus('Analyzing files...');
         setUploadStatus('Generating embeddings...');
